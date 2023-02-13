@@ -1,14 +1,12 @@
 ## Imports
 
 import PyPDF2
-import random
 from numpy import zeros
 from os import listdir
 from os.path import join
 from tqdm import tqdm
 from math import exp, log
 from random import shuffle, uniform, sample
-random.seed(420)
 
 ## Methods
 
@@ -86,13 +84,12 @@ def main(specific_text=None, verbose=True, save=True):
     chars = list(char_dict.keys())
     shuffle(chars)
     permutation = ''.join(chars)
-    uniform_ref = uniform(0, 1)
 
     # hyper parameters
-    beta = 0.66 # tunable hyperparameter
+    beta = 0.63 # tunable hyperparameter (best for all = 0.63)
     permutations = 2 # number of times text is permuted before scoring
-    convergence_delta = 1000 # max number of worse iterations before stopping
-    max_epochs = 10000 # maximum number of iterations to run MCMC
+    convergence_delta = 2000 # max number of worse iterations before stopping
+    max_epochs = 25000 # maximum number of iterations to run MCMC
 
 
     X0 = ''
@@ -103,8 +100,6 @@ def main(specific_text=None, verbose=True, save=True):
         try:
             X0 += get_text(join(text_dir, filename), char_dict)
         except RuntimeError as e:
-            # print(e)
-            # print(f'Issue with file {filename}')
             None
 
     q, p = get_q(X0, char_dict)
@@ -123,7 +118,7 @@ def main(specific_text=None, verbose=True, save=True):
                 e_curr = energy_func(curr, char_dict, encoded, q, p)
                 e_prev = energy_func(permutation, char_dict, encoded, q, p)
                 e_delta = e_curr - e_prev
-                if e_delta < 0 or uniform_ref < exp((-beta) * e_delta):
+                if e_delta < 0 or uniform(0, 1) < exp((-beta) * e_delta):
                     permutation = curr
                     if verbose:
                         print(f'{i}: ' + transition(permutation, char_dict, encoded, 80))
@@ -134,21 +129,20 @@ def main(specific_text=None, verbose=True, save=True):
                         break
             print(f'Permutation: {permutation}')
             print('Decoded text: \n')
-            print(transition(permutation, char_dict, encoded, 100))
+            print(transition(permutation, char_dict, encoded, 80))
             if save:
                 with open(join(decode_dir, f'{header}_decoded.txt'), 'w') as f:
                     f.write(transition(permutation, char_dict, encoded))
                 print(f'Saved {header}_decoded.txt')
         except RuntimeError as e:
-            # print(e)
-            # print(f'Issue with file {filename}')
             None
         print('Enter any key to continue: ')
         _ = input()
 
 ## Run
 
-# main(specific_text='student_20_text1.txt')
-# main(specific_text='student_219_text2.txt')
-main(specific_text='student_102_text3.txt', save=False)
-# main()
+save_data = False
+# main(specific_text='student_20_text1.txt', save=save_data)
+# main(specific_text='student_219_text2.txt', save=save_data)
+# main(specific_text='student_102_text3.txt', save=save_data)
+main(save=save_data)
