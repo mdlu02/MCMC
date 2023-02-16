@@ -6,7 +6,7 @@ from os import listdir
 from os.path import join
 from tqdm import tqdm
 from math import exp, log
-from random import shuffle, uniform, sample
+from random import shuffle, uniform, sample, randint
 
 ## Methods
 
@@ -28,7 +28,8 @@ def get_text(path, char_dict, header=False):
         doc = PyPDF2.PdfReader(path)
         text = ''
         for page in doc.pages:
-            text += clean_text(page.extract_text(), list(char_dict.keys()), header)
+            text += clean_text(page.extract_text(), \
+                               list(char_dict.keys()), header)
     elif text_type == 'txt':
         with open(path, 'r') as file:
             text = clean_text(file.read(), list(char_dict.keys()), header)
@@ -37,7 +38,7 @@ def get_text(path, char_dict, header=False):
     return text
 
 def get_q(text, char_dict):
-    '''Builds Q and P from a given text and char_dict.'''
+    '''Builds Q and P from a given text and char_dict using the digram model.'''
     char_len = len(list(char_dict.keys()))
     q = zeros((char_len, char_len))
     p = zeros((char_len))
@@ -51,9 +52,19 @@ def get_q(text, char_dict):
         q[i] = q[i] / sum(q[i])
     return q, p / len(text)
 
-def new_perm(permutation, permutations):
-    '''Computes a new random permutation'''
-    for _ in range(permutations):
+def new_perm(permutation, permutations, var=0):
+    '''Computes a new random permutation. Allows for some random variance in the
+    number of changes made for the new permutations.'''
+    changes = permutations
+    if var != 0:
+        rand = randint(0, 100)
+        if rand >= 90:
+            changes = permutations + var
+        elif rand <= 10:
+            changes = permutations - var
+        else:
+            changes = permutations
+    for _ in range(changes):
         ab = sample(range(0, len(permutation) - 1), 2)
         a, b = ab[0], ab[1]
         permutation = list(permutation)
@@ -61,21 +72,23 @@ def new_perm(permutation, permutations):
         new_permutation = ''.join(permutation)
     return new_permutation
 
-def transition(sigma, char_dict, encoded, display_amount=None):
+def transition(perm, char_dict, encoded, display_amount=None):
     '''Computes transition on a given text.'''
     data = ''
     display_amount = len(encoded) if display_amount == None else display_amount
     for i in range(display_amount):
-        data += sigma[char_dict[encoded[i]]]
+        data += perm[char_dict[encoded[i]]]
     return data
 
-def energy_func(sigma, char_dict, encoded, q, p):
-    '''Computes the energy on a permuted text.'''
-    trans = transition(sigma, char_dict, encoded)
-    likelihood = log(p[char_dict[trans[0]]])
+def energy_func(perm1, perm2, char_dict, encoded, q, p):
+    '''Computes the energy delta on a permuted texts.'''
+    trans1 = transition(perm1, char_dict, encoded)
+    trans2 = transition(perm2, char_dict, encoded)
+    delta = log(p[char_dict[trans1[0]]]) - log(p[char_dict[trans2[0]]])
     for j in range(1, len(encoded)):
-        likelihood -= log(q[char_dict[trans[j-1]]][char_dict[trans[j]]])
-    return likelihood
+        delta -= log(q[char_dict[trans1[j-1]]][char_dict[trans1[j]]]) - \
+                        log(q[char_dict[trans2[j-1]]][char_dict[trans2[j]]])
+    return delta
 
 def main(specific_text=None, verbose=True, save=True):
     '''Runs MCMC using all files in /text_data on all files in /encoded_text
@@ -83,13 +96,14 @@ def main(specific_text=None, verbose=True, save=True):
     char_dict = {x: i for i, x in enumerate(' abcdefghijklmnopqrstuvwxyz')}
     chars = list(char_dict.keys())
     shuffle(chars)
-    permutation = ''.join(chars)
+    perm = ''.join(chars)
 
     # hyper parameters
-    beta = 0.63 # tunable hyperparameter (best for all = 0.63)
+    beta = 0.65 # tunable hyperparameter (best for all = 0.63)
     permutations = 2 # number of times text is permuted before scoring
+    var = 0
     convergence_delta = 2000 # max number of worse iterations before stopping
-    max_epochs = 25000 # maximum number of iterations to run MCMC
+    max_epochs = 10000 # maximum number of iterations to run MCMC
 
 
     X0 = ''
@@ -114,35 +128,34 @@ def main(specific_text=None, verbose=True, save=True):
             encoded = get_text(join(encoded_dir, filename), char_dict, True)
             convergence_counter = 0
             for i in range(max_epochs):
-                curr = new_perm(permutation, permutations)
-                e_curr = energy_func(curr, char_dict, encoded, q, p)
-                e_prev = energy_func(permutation, char_dict, encoded, q, p)
-                e_delta = e_curr - e_prev
+                curr = new_perm(perm, permutations, var=var)
+                e_delta = energy_func(curr, perm, char_dict, encoded, q, p)
                 if e_delta < 0 or uniform(0, 1) < exp((-beta) * e_delta):
-                    permutation = curr
+                    perm = curr
                     if verbose:
-                        print(f'{i}: ' + transition(permutation, char_dict, encoded, 80))
+                        print(f'{i}: ' + \
+                              transition(perm, char_dict, encoded, 80))
                     convergence_counter = 0
                 else:
                     convergence_counter += 1
                     if convergence_counter >= convergence_delta:
                         break
-            print(f'Permutation: {permutation}')
+            print(f'Permutation: {perm}')
             print('Decoded text: \n')
-            print(transition(permutation, char_dict, encoded, 80))
+            print(transition(perm, char_dict, encoded, 80))
+            print('Enter any key to continue: ')
+            _ = input()
             if save:
                 with open(join(decode_dir, f'{header}_decoded.txt'), 'w') as f:
-                    f.write(transition(permutation, char_dict, encoded))
+                    f.write(transition(perm, char_dict, encoded))
                 print(f'Saved {header}_decoded.txt')
         except RuntimeError as e:
             None
-        print('Enter any key to continue: ')
-        _ = input()
 
 ## Run
 
-save_data = False
-# main(specific_text='student_20_text1.txt', save=save_data)
+save_data = True
 # main(specific_text='student_219_text2.txt', save=save_data)
+main(specific_text='student_20_text1.txt', save=save_data)
 # main(specific_text='student_102_text3.txt', save=save_data)
-main(save=save_data)
+# main(save=save_data)
