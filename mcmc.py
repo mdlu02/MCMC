@@ -52,7 +52,7 @@ def get_q(text, char_dict):
         q[i] = q[i] / sum(q[i])
     return q, p / len(text)
 
-def new_perm(permutation, permutations, var=0):
+def new_perm(perm, permutations, visited, var=0):
     '''Computes a new random permutation. Allows for some random variance in the
     number of changes made for the new permutations.'''
     changes = permutations
@@ -64,12 +64,16 @@ def new_perm(permutation, permutations, var=0):
             changes = permutations - var
         else:
             changes = permutations
-    for _ in range(changes):
-        ab = sample(range(0, len(permutation) - 1), 2)
-        a, b = ab[0], ab[1]
-        permutation = list(permutation)
-        permutation[a], permutation[b] = permutation[b], permutation[a]
-        new_permutation = ''.join(permutation)
+    while True:
+        curr = perm
+        for _ in range(changes):
+            ab = sample(range(0, len(curr) - 1), 2)
+            a, b = ab[0], ab[1]
+            curr = list(curr)
+            curr[a], curr[b] = curr[b], curr[a]
+            new_permutation = ''.join(curr)
+        if new_permutation not in visited:
+            break
     return new_permutation
 
 def transition(perm, char_dict, encoded, display_amount=None):
@@ -80,12 +84,14 @@ def transition(perm, char_dict, encoded, display_amount=None):
         data += perm[char_dict[encoded[i]]]
     return data
 
-def energy_func(perm1, perm2, char_dict, encoded, q, p):
+def energy_func(perm1, perm2, char_dict, encoded, q, p, lim=None):
     '''Computes the energy delta on a permuted texts.'''
     trans1 = transition(perm1, char_dict, encoded)
     trans2 = transition(perm2, char_dict, encoded)
+    if lim == None:
+        lim = len(trans1)
     delta = log(p[char_dict[trans1[0]]]) - log(p[char_dict[trans2[0]]])
-    for j in range(1, len(encoded)):
+    for j in range(1, lim):
         delta -= log(q[char_dict[trans1[j-1]]][char_dict[trans1[j]]]) - \
                         log(q[char_dict[trans2[j-1]]][char_dict[trans2[j]]])
     return delta
@@ -99,9 +105,10 @@ def main(specific_text=None, verbose=True, save=True):
     perm = ''.join(chars)
 
     # hyper parameters
-    beta = 0.65 # tunable hyperparameter (best for all = 0.63)
+    beta = 0.635 # tunable hyperparameter (best for all = 0.635)
     permutations = 2 # number of times text is permuted before scoring
-    var = 0
+    var = 0 # Value to shift permutations under a random conditioin
+    lim = None # First x characters to consider for energy calculation
     convergence_delta = 2000 # max number of worse iterations before stopping
     max_epochs = 10000 # maximum number of iterations to run MCMC
 
@@ -110,7 +117,7 @@ def main(specific_text=None, verbose=True, save=True):
     text_dir = './text_data'
     decode_dir = './decoded_text'
     print('Building q and p...')
-    for filename in listdir(text_dir):
+    for filename in tqdm(listdir(text_dir)):
         try:
             X0 += get_text(join(text_dir, filename), char_dict)
         except RuntimeError as e:
@@ -124,17 +131,21 @@ def main(specific_text=None, verbose=True, save=True):
         if specific_text != None and filename != specific_text:
             continue
         header = filename.split('.')[0]
+        print(f'File: {filename}...')
         try:
             encoded = get_text(join(encoded_dir, filename), char_dict, True)
             convergence_counter = 0
+            visited = set()
             for i in range(max_epochs):
-                curr = new_perm(perm, permutations, var=var)
-                e_delta = energy_func(curr, perm, char_dict, encoded, q, p)
+                curr = new_perm(perm, permutations, visited, var=var)
+                visited.add(curr)
+                e_delta = energy_func(curr, perm, char_dict, encoded, q, p, lim)
                 if e_delta < 0 or uniform(0, 1) < exp((-beta) * e_delta):
                     perm = curr
+                    visited.clear()
                     if verbose:
                         print(f'{i}: ' + \
-                              transition(perm, char_dict, encoded, 80))
+                                transition(perm, char_dict, encoded, 80))
                     convergence_counter = 0
                 else:
                     convergence_counter += 1
@@ -154,7 +165,7 @@ def main(specific_text=None, verbose=True, save=True):
 
 ## Run
 
-save_data = True
+save_data = False
 # main(specific_text='student_219_text2.txt', save=save_data)
 main(specific_text='student_20_text1.txt', save=save_data)
 # main(specific_text='student_102_text3.txt', save=save_data)
